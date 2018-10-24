@@ -1,1 +1,1 @@
-# Repository for kaggle competitions and other deep-learning practice kernels
+# Repository for kaggle competitions and other ml practice kernels
