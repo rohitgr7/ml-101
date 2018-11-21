@@ -2,6 +2,7 @@
 # Correct the docs
 # Make fix_missing optimal
 # Try adding day and dayofyear in attr of add_datecols()
+# fix tv_split
 
 
 import numpy as np
@@ -48,24 +49,6 @@ def replace_nan(df, nan_cols):
 
 
 def tv_split(X, y, valid_sz=0.2, temporal=None, optim=False):
-    """
-    Split data into train and validation data
-
-    Parameters
-    ----------
-        X: Independant data
-        y: Dependant data
-        valid_sz: Size of validation set b/w 0 and 1
-        temporal: (Boolean) Wheather the data has temporal column or not
-        optim: (Boolean) Return optimized train and validation set if true and data is not temporal
-
-    Returns
-    -------
-        X: Independant data
-        y: Dependant data
-        na_dict: Dictionary mapping for columns with missing data
-        mapper: A DataFrameMapper which stores mean and standard deviation for continuous data which is then used for scaling
-    """
     shuffle = True
     stratify = None
 
@@ -93,21 +76,6 @@ def conv_contncat(df, cont_cols=None, cat_cols=None):
 
 
 def add_datecols(df, col, time=True, drop=True):
-    """
-    Add date-related columns
-
-    Parameters
-    ----------
-        df: Dataframe to be processed
-        col: Datetime column name
-        time: (Boolean) Wheather to add time related columns or not
-        drop: (Boolean) Wheather to drop the original column or not
-
-    Returns
-    -------
-        None
-    """
-
     fld_dtype = df[col].dtype
 
     if not np.issubdtype(fld_dtype, np.datetime64):
@@ -128,47 +96,26 @@ def add_datecols(df, col, time=True, drop=True):
         df.drop(col, axis=1, inplace=True)
 
 
-def get_nn_mappers(df, cat_cols, cont_cols):
-    """
-    Create and return mappers for categorical and continuous data
-
-    Parameters
-    ----------
-        df: Dataframe to be processed
-        cat_cols: Datetime column name
-        cont_cols: (Boolean) Wheather to add time related columns or not
-
-    Returns
-    -------
-        CategoricalMapper, ContinuousMapper
-    """
-
-    cat_maps = [(o, LabelEncoder()) for o in cat_cols]
-    cont_maps = [([o], StandardScaler()) for o in cont_cols]
-
-    conv_mapper = DataFrameMapper(cont_maps).fit(df)
-    cat_mapper = DataFrameMapper(cat_maps).fit(df)
-    return cat_mapper, conv_mapper
+def get_nn_mappers(df, cat_cols=None, cont_cols=None):
+    cat_mapper, cont_mapper = None, None
+    
+    if cat_cols is not None:
+        cat_maps = [(o, LabelEncoder()) for o in cat_cols]
+        cat_mapper = DataFrameMapper(cat_maps).fit(df)
+    
+    if cont_cols:
+        cont_maps = [([o], StandardScaler()) for o in cont_cols]
+        cont_mapper = DataFrameMapper(cont_maps).fit(df)
+    
+    return cat_mapper, cont_mapper
 
 
-def fix_missing(df, na_dict=None, cont_cols=None, cat_cols=None):
-    """
-    Fill continous mssing values with mean and categorical missing values with 'NaN'
-
-    Parameters
-    ----------
-        df: Dataframe to be processed
-        na_dict: Mapping of columns and values to be filled in the missing place corresponding to the column
-
-    Returns
-    -------
-        na_dict: A dictionary containg the map of column names with the corresponding value to be filled in missing place
-    """
-
+def fix_missing(df, na_dict=None, cont_cols=None, cat_cols=None, add_na=True):
     if na_dict is not None:
         for n in na_dict.keys():
             col_null = df[n].isnull()
-            df[n + '_na'] = col_null
+            if add_na:
+                df[n + '_na'] = col_null
             df.loc[col_null, n] = na_dict[n]
 
         if cont_cols is not None:
@@ -189,7 +136,8 @@ def fix_missing(df, na_dict=None, cont_cols=None, cat_cols=None):
             for n in cont_cols:
                 col_null = df[n].isnull()
                 if col_null.sum():
-                    df[n + '_na'] = col_null
+                    if add_na:
+                        df[n + '_na'] = col_null
                     na_dict[n] = df[n].median()
                     df.loc[col_null, n] = na_dict[n]
 
@@ -197,7 +145,8 @@ def fix_missing(df, na_dict=None, cont_cols=None, cat_cols=None):
             for n in cat_cols:
                 col_null = df[n].isnull()
                 if col_null.sum():
-                    df[n + '_na'] = col_null
+                    if add_na:
+                        df[n + '_na'] = col_null
                     na_dict[n] = 'NaN'
                     df.loc[col_null, n] = na_dict[n]
 
@@ -219,30 +168,9 @@ def get_one_hot(df, max_n_cat, drop_first, cat_mapper):
     return df
 
 
-def proc_df(df, y_col, subset=None, drop_cols=None, do_scale=False, cat_mapper=None, cont_mapper=None, max_n_cat=None, drop_first=False):
-    """
-    Split data into x, y
-
-    Parameters
-    ----------
-        df: Dataframe to be processed
-        y_col: Column name of the df to be predicted
-        subset: dtype(int) Number of rows required from the data
-        drop_cols: Columns to be dropped
-        na_dict: A dictionary mapping column to missing values to be filled
-        do_scale: (Boolean) Wheather to scale the independant value or not
-        mapper: A DataFrameMapper containg mean and std of columns used to normalize the data
-        max_n_cat: Minimum number of categories to create one-hot encodings
-        drop_first: (Boolean) Wheather to drop first column during one_hot_encoding
-
-    Returns
-    -------
-        X: Independant data
-        y: Dependant data
-        na_dict: dictionarynary mapping for columns with missing data
-        mapper: A DataFrameMapper which stores mean and standard deviation for continuous data which is then used for scaling
-    """
-
+def proc_df(df, y_col=None, subset=None, drop_cols=None, do_scale=False, cat_mapper=None, cont_mapper=None, max_n_cat=None, drop_first=False):
+    df = df.copy()
+    
     if subset is not None:
         df = df[-subset:]
 
@@ -251,16 +179,19 @@ def proc_df(df, y_col, subset=None, drop_cols=None, do_scale=False, cat_mapper=N
 
     if do_scale:
         df[cont_mapper.transformed_names_] = cont_mapper.transform(df)
-
-    df[cat_mapper.transformed_names_] = cat_mapper.transform(df)
+    
+    if cat_mapper:
+        df[cat_mapper.transformed_names_] = cat_mapper.transform(df)
 
     if max_n_cat is not None:
         df = get_one_hot(df, max_n_cat, drop_first, cat_mapper)
 
-    X = df.drop(y_col, axis=1)
-    y = df[y_col]
+    if y_col is not None:
+        X = df.drop(y_col, axis=1)
+        y = df[y_col]
+        return X, y
 
-    return X, y
+    return df
 
 
 def rf_feat_importance(m, df):
@@ -268,13 +199,8 @@ def rf_feat_importance(m, df):
 
 
 def set_rf_samples(n):
-    """ Changes Scikit learn's random forests to give each tree a random sample of
-    n random rows.
-    """
     forest._generate_sample_indices = (lambda rs, n_samples: forest.check_random_state(rs).randint(0, n_samples, n))
 
 
 def reset_rf_samples():
-    """ Undoes the changes produced by set_rf_samples.
-    """
-    forest._generate_sample_indices = (lambda rs, n_samples: forest.check_random_state(rs).randint(0, n_samples, n_samples))
+	forest._generate_sample_indices = (lambda rs, n_samples: forest.check_random_state(rs).randint(0, n_samples, n_samples
